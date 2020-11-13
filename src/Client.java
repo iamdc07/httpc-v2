@@ -1,20 +1,28 @@
+import model.Packet;
+
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
 import java.nio.ByteBuffer;
+import java.nio.channels.DatagramChannel;
+import java.nio.channels.SelectionKey;
+import java.nio.channels.Selector;
 import java.nio.channels.SocketChannel;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
+import java.util.Set;
+
+import static java.nio.channels.SelectionKey.OP_READ;
 
 public class Client {
     public static void main(String[] args) throws IOException, InterruptedException {
         BufferedReader bufferedReader = new BufferedReader(new InputStreamReader(System.in));
         HttpResponse httpResponse = new HttpResponse();
-        Charset utf8 = StandardCharsets.UTF_8;
+//        Charset utf8 = StandardCharsets.UTF_8;
         RequestParameters requestParameters = null;
-        String response = "", input = "", choice = "";
+        String input = "", choice = "";
         boolean redirect = false;
 
         System.out.print("Type in 'httpc Command' or 'httpc help' to get started!");
@@ -41,56 +49,98 @@ public class Client {
 
                 if (requestParameters.isValid && choice.equalsIgnoreCase("1")) {
                     invokeThreads(requestParameters);
-//                    RequestParameters requestParameters1 = new RequestParameters();
-//                    requestParameters1.isVerbose = true;
-//                    requestParameters1.isInline = true;
-//                    requestParameters1.isPostRequest = true;
-//                    requestParameters1.isValid = true;
-//                    requestParameters1.indexVerbose = 11;
-//                    requestParameters1.requestLine = "http://localhost/foo";
-//                    requestParameters1.data = "Replacing the existing data";
-//                    invokeThreads(requestParameters1);
                     continue;
                 }
 
                 if (requestParameters.isValid) {
                     HttpRequest httpRequest = new HttpRequest();
                     String payload = httpRequest.processRequest(requestParameters);
-                    ByteBuffer byteBuffer = utf8.encode(payload);
 
-                    try {
-                        SocketAddress socketAddress = new InetSocketAddress(requestParameters.host, requestParameters.port);
-                        SocketChannel socketChannel = SocketChannel.open();
-                        socketChannel.connect(socketAddress);
-                        socketChannel.write(byteBuffer);
-                        byteBuffer.clear();
+                    try(DatagramChannel channel = DatagramChannel.open()){
+                        InetSocketAddress serverAddress = new InetSocketAddress(requestParameters.host, requestParameters.port);
+                        SocketAddress routerAddress = new InetSocketAddress(requestParameters.routerHost, requestParameters.routerPort);
+//                        InetSocketAddress serverAddress = new InetSocketAddress(serverHost, serverPort);
+//                        SocketAddress routerAddress = new InetSocketAddress(routerHost, routerPort);
 
-                        // Receiving response from the server
-                        while (byteBuffer.hasRemaining()) {
-                            int length = socketChannel.read(byteBuffer);
+                        // TO-DO Have a 3-way Handshake here
+                        // TO-DO Create support for data > 1013 bytes
 
-                            if (length == -1)
-                                break;
+                        Packet p = new Packet.Builder()
+                                .setType(0)
+                                .setSequenceNumber(1L)
+                                .setPortNumber(serverAddress.getPort())
+                                .setPeerAddress(serverAddress.getAddress())
+                                .setPayload(payload.getBytes())
+                                .create();
+                        channel.send(p.toBuffer(), routerAddress);
+                        // Packet Sent
 
-                            byteBuffer.flip();
+                        // Receive a packet within the timeout
+                        channel.configureBlocking(false);
+                        Selector selector = Selector.open();
+                        channel.register(selector, OP_READ);
+                        // Waiting for the response
+                        selector.select(5000);
 
-                            String lines = String.valueOf(utf8.decode(byteBuffer));
-                            response = response.concat(lines);
-                            byteBuffer.compact();
+                        Set<SelectionKey> keys = selector.selectedKeys();
+                        if(keys.isEmpty()){
+                            System.out.println("No response after timeout");
+                            continue;
                         }
 
-                        byteBuffer.clear();
-                        socketChannel.close();
+                        // We just want a single response.
+                        ByteBuffer buf = ByteBuffer.allocate(Packet.MAX_LEN);
+                        SocketAddress router = channel.receive(buf);
+                        buf.flip();
+                        Packet responsePacket = Packet.fromBuffer(buf);
+//                        logger.info("Packet: {}", resp);
+//                        logger.info("Router: {}", router);
+                        String responsePayload = new String(responsePacket.getPayload(), StandardCharsets.UTF_8);
+//                        logger.info("Payload: {}",  payload);
 
-                        if (httpResponse.processResponse(response, requestParameters)) {
+                        if (httpResponse.processResponse(responsePayload, requestParameters)) {
                             requestParameters.requestLine = requestParameters.redirectionUrl;
                             redirect = true;
                             System.out.println("\nREDIRECTING...\n");
                         }
-                        response = "";
-                    } catch (Exception ex) {
+//                        response = "";
+                        keys.clear();
+                    } catch (IOException ex) {
                         ex.printStackTrace();
                     }
+//                    try {
+//
+//                        SocketChannel socketChannel = SocketChannel.open();
+//                        socketChannel.connect(socketAddress);
+//                        socketChannel.write(byteBuffer);
+//                        byteBuffer.clear();
+//
+//                        // Receiving response from the server
+//                        while (byteBuffer.hasRemaining()) {
+//                            int length = socketChannel.read(byteBuffer);
+//
+//                            if (length == -1)
+//                                break;
+//
+//                            byteBuffer.flip();
+//
+//                            String lines = String.valueOf(utf8.decode(byteBuffer));
+//                            response = response.concat(lines);
+//                            byteBuffer.compact();
+//                        }
+//
+//                        byteBuffer.clear();
+//                        socketChannel.close();
+//
+//                        if (httpResponse.processResponse(response, requestParameters)) {
+//                            requestParameters.requestLine = requestParameters.redirectionUrl;
+//                            redirect = true;
+//                            System.out.println("\nREDIRECTING...\n");
+//                        }
+//                        response = "";
+//                    } catch (Exception ex) {
+//                        ex.printStackTrace();
+//                    }
                 } else {
                     System.out.println("Your input is invalid, please try again!");
                 }
@@ -100,9 +150,11 @@ public class Client {
 
     private static void invokeThreads(RequestParameters requestParameters) throws InterruptedException, IOException {
         SocketAddress socketAddress = new InetSocketAddress(requestParameters.host, 8080);
+        InetSocketAddress serverAddress = new InetSocketAddress(requestParameters.host, requestParameters.port);
+        SocketAddress routerAddress = new InetSocketAddress(requestParameters.routerHost, requestParameters.routerPort);
 
-        for (int i = 0; i < 200; i++) {
-            HandleThreads handleThreads = new HandleThreads(requestParameters, socketAddress);
+        for (int i = 0; i < 10; i++) {
+            HandleThreads handleThreads = new HandleThreads(requestParameters, serverAddress, routerAddress);
             handleThreads.start();
         }
 

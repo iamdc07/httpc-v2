@@ -7,11 +7,13 @@ import java.nio.charset.StandardCharsets;
 
 public class HandleThreads extends Thread {
     RequestParameters requestParameters;
-    SocketAddress socketAddress;
+    InetSocketAddress serverAddress;
+    SocketAddress routerAddress;
 
-    public HandleThreads(RequestParameters requestParameters, SocketAddress socketAddress) {
+    public HandleThreads(RequestParameters requestParameters, InetSocketAddress serverAddress, SocketAddress routerAddress) {
         this.requestParameters = requestParameters;
-        this.socketAddress = socketAddress;
+        this.serverAddress = serverAddress;
+        this.routerAddress = routerAddress;
     }
 
     public void run(){
@@ -25,7 +27,7 @@ public class HandleThreads extends Thread {
 
         try {
             SocketChannel socketChannel = SocketChannel.open();
-            socketChannel.connect(socketAddress);
+//            socketChannel.connect(socketAddress);
             socketChannel.write(byteBuffer);
             byteBuffer.clear();
 

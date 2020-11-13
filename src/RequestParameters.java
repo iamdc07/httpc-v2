@@ -14,6 +14,7 @@ public class RequestParameters {
     int indexInline;
     int indexWriteToFile;
     int port;
+    int routerPort;
 
     ArrayList<String> headers;
 
@@ -23,12 +24,14 @@ public class RequestParameters {
     String inputFile;
     String outputFile;
     String redirectionUrl;
+    String routerHost;
 
     public RequestParameters() {
         this.indexVerbose = -1;
         this.indexInline = -1;
         this.indexWriteToFile = -1;
         this.port = 8080;
+        this.routerPort = 3000;
         this.headers = new ArrayList<>();
         this.host = "";
         this.requestLine = "";
@@ -36,5 +39,6 @@ public class RequestParameters {
         this.inputFile = "";
         this.outputFile = "";
         this.redirectionUrl = "";
+        this.routerHost = "localhost";
     }
 }
