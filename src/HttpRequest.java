@@ -77,6 +77,9 @@ public class HttpRequest {
 //httpc post -v -f input.txt http://localhost:8080/temp
 //httpc get -v -h Content-Type:application/json http://localhost/sample
 //httpc get -v http://localhost/sampleFile
+//httpc get -v http://localhost/input
+//httpc get -v http://localhost/input -o hello.txt
+//httpc post -v -f input.txt http://localhost/test
 //httpc get -v -h Content-Type:application/text http://localhost/sample
 //httpc get -v -h Content-Disposition:attachment http://localhost/Server.java
 //httpc get -v -h Content-Disposition:inline http://localhost/Server.java

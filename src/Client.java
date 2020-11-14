@@ -5,6 +5,7 @@ import java.io.IOException;
 import java.io.InputStreamReader;
 import java.net.InetSocketAddress;
 import java.net.SocketAddress;
+import java.nio.Buffer;
 import java.nio.ByteBuffer;
 import java.nio.channels.DatagramChannel;
 import java.nio.channels.SelectionKey;
@@ -12,6 +13,8 @@ import java.nio.channels.Selector;
 import java.nio.channels.SocketChannel;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
+import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Set;
 
 import static java.nio.channels.SelectionKey.OP_READ;
@@ -54,26 +57,32 @@ public class Client {
 
                 if (requestParameters.isValid) {
                     HttpRequest httpRequest = new HttpRequest();
-                    String payload = httpRequest.processRequest(requestParameters);
 
-                    try(DatagramChannel channel = DatagramChannel.open()){
+                    try (DatagramChannel channel = DatagramChannel.open()) {
                         InetSocketAddress serverAddress = new InetSocketAddress(requestParameters.host, requestParameters.port);
                         SocketAddress routerAddress = new InetSocketAddress(requestParameters.routerHost, requestParameters.routerPort);
 //                        InetSocketAddress serverAddress = new InetSocketAddress(serverHost, serverPort);
 //                        SocketAddress routerAddress = new InetSocketAddress(routerHost, routerPort);
 
                         // TO-DO Have a 3-way Handshake here
-                        // TO-DO Create support for data > 1013 bytes
+                        // TO-DO Make it reliable
 
-                        Packet p = new Packet.Builder()
-                                .setType(0)
-                                .setSequenceNumber(1L)
-                                .setPortNumber(serverAddress.getPort())
-                                .setPeerAddress(serverAddress.getAddress())
-                                .setPayload(payload.getBytes())
-                                .create();
-                        channel.send(p.toBuffer(), routerAddress);
-                        // Packet Sent
+                        ArrayList<Packet> packetList = generatePackets(httpRequest, requestParameters, serverAddress);
+
+//                        Packet packet = new Packet.Builder()
+//                                .setType(0)
+//                                .setSequenceNumber(1L)
+//                                .setPortNumber(serverAddress.getPort())
+//                                .setPeerAddress(serverAddress.getAddress())
+//                                .setPayload(payload.getBytes())
+//                                .create();
+
+                        // Send each packet one by one
+                        for (Packet each : packetList) {
+                            channel.send(each.toBuffer(), routerAddress);
+                            // Packet Sent
+                        }
+                        packetList.clear();
 
                         // Receive a packet within the timeout
                         channel.configureBlocking(false);
@@ -83,28 +92,57 @@ public class Client {
                         selector.select(5000);
 
                         Set<SelectionKey> keys = selector.selectedKeys();
-                        if(keys.isEmpty()){
+                        if (keys.isEmpty()) {
                             System.out.println("No response after timeout");
                             continue;
                         }
 
-                        // We just want a single response.
+                        // Create Buffer for Response
                         ByteBuffer buf = ByteBuffer.allocate(Packet.MAX_LEN);
-                        SocketAddress router = channel.receive(buf);
-                        buf.flip();
-                        Packet responsePacket = Packet.fromBuffer(buf);
+
+                        // Receive each packet one by one
+                        while (true) {
+                            channel.receive(buf);
+                            buf.flip();
+
+                            if (buf.limit() < Packet.MIN_LEN || buf.limit() > Packet.MAX_LEN)
+                                break;
+
+                            Packet responsePacket = Packet.fromBuffer(buf);
+                            buf.clear();
+                            packetList.add(responsePacket);
+                            System.out.println("Received ArrayList Size:" + packetList.size());
+                            // Wait for response
+                            selector.select(5000);
+
+                            keys = selector.selectedKeys();
+                            if (keys.isEmpty()) {
+                                System.out.println("No response after timeout");
+                                break;
+                            }
+                        }
+
+                        String response = "";
+
+                        for (Packet each : packetList) {
+                            System.out.println("Response Packet Seq " + each.getSequenceNumber());
+                            String responsePayload = new String(each.getPayload(), StandardCharsets.UTF_8);
+                            response = response.concat(responsePayload);
+                        }
 //                        logger.info("Packet: {}", resp);
 //                        logger.info("Router: {}", router);
-                        String responsePayload = new String(responsePacket.getPayload(), StandardCharsets.UTF_8);
+
+//                        String responsePayload = new String(packetList.get(0).getPayload(), StandardCharsets.UTF_8);
 //                        logger.info("Payload: {}",  payload);
 
-                        if (httpResponse.processResponse(responsePayload, requestParameters)) {
+                        if (httpResponse.processResponse(response, requestParameters)) {
                             requestParameters.requestLine = requestParameters.redirectionUrl;
                             redirect = true;
                             System.out.println("\nREDIRECTING...\n");
                         }
 //                        response = "";
                         keys.clear();
+                        packetList.clear();
                     } catch (IOException ex) {
                         ex.printStackTrace();
                     }
@@ -149,7 +187,7 @@ public class Client {
     }
 
     private static void invokeThreads(RequestParameters requestParameters) throws InterruptedException, IOException {
-        SocketAddress socketAddress = new InetSocketAddress(requestParameters.host, 8080);
+//        SocketAddress socketAddress = new InetSocketAddress(requestParameters.host, 8080);
         InetSocketAddress serverAddress = new InetSocketAddress(requestParameters.host, requestParameters.port);
         SocketAddress routerAddress = new InetSocketAddress(requestParameters.routerHost, requestParameters.routerPort);
 
@@ -157,7 +195,31 @@ public class Client {
             HandleThreads handleThreads = new HandleThreads(requestParameters, serverAddress, routerAddress);
             handleThreads.start();
         }
+    }
 
+    private static ArrayList<Packet> generatePackets(HttpRequest httpRequest, RequestParameters requestParameters, InetSocketAddress serverAddress) {
+        ArrayList<Packet> packetList = new ArrayList<>();
+        String payload = httpRequest.processRequest(requestParameters);
+        byte[] buffer = payload.getBytes();
+        long seq = 1L;
+
+        for (int i = 0; i < buffer.length; i = i + 1013) {
+//            byte[] bytes = payload.getBytes(i, i + 1012);
+            byte[] slice = Arrays.copyOfRange(buffer, i, i + 1012);
+
+            Packet packet = new Packet.Builder()
+                    .setType(0)
+                    .setSequenceNumber(seq)
+                    .setPortNumber(serverAddress.getPort())
+                    .setPeerAddress(serverAddress.getAddress())
+                    .setPayload(slice)
+                    .create();
+
+            packetList.add(packet);
+            seq++;
+        }
+
+        return packetList;
     }
 
     @SuppressWarnings("Duplicates")
