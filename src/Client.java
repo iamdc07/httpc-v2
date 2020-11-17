@@ -13,20 +13,27 @@ import java.nio.channels.Selector;
 import java.nio.channels.SocketChannel;
 import java.nio.charset.Charset;
 import java.nio.charset.StandardCharsets;
-import java.util.ArrayList;
-import java.util.Arrays;
-import java.util.Set;
+import java.util.*;
+import java.util.concurrent.ArrayBlockingQueue;
 
 import static java.nio.channels.SelectionKey.OP_READ;
 
 public class Client {
+//    static long currentSequence = 0L;
     public static void main(String[] args) throws IOException, InterruptedException {
         BufferedReader bufferedReader = new BufferedReader(new InputStreamReader(System.in));
         HttpResponse httpResponse = new HttpResponse();
+        ArrayBlockingQueue<Long> ackBuffer = new ArrayBlockingQueue<>(99);
+        ArrayList<TimerTask> tasks = new ArrayList<>();
+//        ArrayBlockingQueue<Packet> responsePackets = new ArrayBlockingQueue<>(99);
+        List<Packet> receivedPackets = Collections.synchronizedList(new ArrayList<>());
+        Set<Long> sequenceNumbers = new HashSet<>();
 //        Charset utf8 = StandardCharsets.UTF_8;
         RequestParameters requestParameters = null;
+        Packet finalPacket = null;
         String input = "", choice = "";
         boolean redirect = false;
+        int start = 0;
 
         System.out.print("Type in 'httpc Command' or 'httpc help' to get started!");
 
@@ -78,53 +85,176 @@ public class Client {
 //                                .create();
 
                         // Send each packet one by one
-                        for (Packet each : packetList) {
-                            channel.send(each.toBuffer(), routerAddress);
-                            // Packet Sent
-                        }
-                        packetList.clear();
+//                        for (Packet each : packetList) {
+//                            channel.send(each.toBuffer(), routerAddress);
+//                            // Packet Sent
+//                        }
+                        boolean flag = true;
 
-                        // Receive a packet within the timeout
-                        channel.configureBlocking(false);
-                        Selector selector = Selector.open();
-                        channel.register(selector, OP_READ);
-                        // Waiting for the response
-                        selector.select(5000);
+                        Timer timer = new Timer(true);
 
-                        Set<SelectionKey> keys = selector.selectedKeys();
-                        if (keys.isEmpty()) {
-                            System.out.println("No response after timeout");
-                            continue;
+                        // Send Packets
+                        while (flag) {
+                            flag = sendPackets(packetList, channel, routerAddress, start, timer, tasks);
+
+                            int k = 0;
+
+                            // Create Buffer for Response
+                            ByteBuffer buf = ByteBuffer.allocate(Packet.MAX_LEN);
+
+                            // Receive each Ack one by one
+                            while (k < 5) {
+                                channel.receive(buf);
+                                buf.flip();
+
+//                                // Condition for final(Last) packet [Needs to be modified]
+//                                if (buf.limit() < Packet.MIN_LEN || buf.limit() > Packet.MAX_LEN)
+//                                    break;
+
+                                Packet ackPacket = Packet.fromBuffer(buf);
+                                System.out.println("BUFFER SIZE:" + buf.limit());
+                                buf.clear();
+
+                                if (!ackBuffer.contains(ackPacket.getSequenceNumber())) {
+                                    ackBuffer.add(ackPacket.getSequenceNumber());
+
+                                    System.out.println("ACK BUFFER SIZE:" + ackBuffer.size());
+                                    System.out.println("TASKS SIZE:" + tasks.size());
+                                    System.out.println("ACK SEQ:" + ((int) ackPacket.getSequenceNumber()));
+
+                                    if (tasks.size() >= ackBuffer.size()) {
+                                        TimerTask timerTask = tasks.get((int) ackPacket.getSequenceNumber() - 1);
+                                        timerTask.cancel();
+                                        System.out.println("CANCELLED TASK:" + (ackPacket.getSequenceNumber() - 1));
+                                    }
+                                }
+
+                                if (ackBuffer.size() == tasks.size()) {
+                                    break;
+                                }
+
+//                                packetList.add(responsePacket);
+                                System.out.println("Received Ack List Size:" + ackBuffer.size());
+//                                // Wait for response
+//                                selector.select(5000);
+//
+//                                keys = selector.selectedKeys();
+//                                if (keys.isEmpty()) {
+//                                    System.out.println("No response after timeout");
+//                                    break;
+//                                }
+                                k++;
+                            }
+
+                            start += 5;
                         }
+//                        packetList.clear();
+                        timer.cancel();
+
+//                        // Receive a packet within the timeout
+//                        channel.configureBlocking(false);
+//                        Selector selector = Selector.open();
+//                        channel.register(selector, OP_READ);
+//                        // Waiting for the response
+//                        selector.select(5000);
+//
+//                        Set<SelectionKey> keys = selector.selectedKeys();
+//                        if (keys.isEmpty()) {
+//                            System.out.println("No response after timeout");
+//                            continue;
+//                        }
+
+                        // Create Buffer for Response
+//                        ByteBuffer buf = ByteBuffer.allocate(Packet.MAX_LEN);
+//
+//                        // Receive each packet one by one
+//                        while (true) {
+//                            channel.receive(buf);
+//                            buf.flip();
+//
+//                            if (buf.limit() < Packet.MIN_LEN || buf.limit() > Packet.MAX_LEN)
+//                                break;
+//
+//                            Packet responsePacket = Packet.fromBuffer(buf);
+//                            buf.clear();
+//                            packetList.add(responsePacket);
+//                            System.out.println("Received ArrayList Size:" + packetList.size());
+//                            // Wait for response
+//                            selector.select(5000);
+//
+//                            keys = selector.selectedKeys();
+//                            if (keys.isEmpty()) {
+//                                System.out.println("No response after timeout");
+//                                break;
+//                            }
+//                        }
+                        flag = true;
+                        start = 0;
 
                         // Create Buffer for Response
                         ByteBuffer buf = ByteBuffer.allocate(Packet.MAX_LEN);
 
-                        // Receive each packet one by one
-                        while (true) {
+                        // Receive Response
+                        while (flag) {
                             channel.receive(buf);
                             buf.flip();
 
-                            if (buf.limit() < Packet.MIN_LEN || buf.limit() > Packet.MAX_LEN)
-                                break;
+//                            // Condition for final(Last) packet [Needs to be modified]
+//                            if (buf.limit() < Packet.MIN_LEN || buf.limit() > Packet.MAX_LEN)
+//                                break;
 
                             Packet responsePacket = Packet.fromBuffer(buf);
                             buf.clear();
-                            packetList.add(responsePacket);
-                            System.out.println("Received ArrayList Size:" + packetList.size());
-                            // Wait for response
-                            selector.select(5000);
 
-                            keys = selector.selectedKeys();
-                            if (keys.isEmpty()) {
-                                System.out.println("No response after timeout");
-                                break;
+                            if (!sequenceNumbers.contains(responsePacket.getSequenceNumber())) {
+//                                sequenceNumbers.add(responsePacket.getSequenceNumber());
+                                System.out.println("Received Response PACK Seq number:" + responsePacket.getSequenceNumber());
+//                                System.out.println("Current Sequence Pointer:" + currentSequence);
+
+                                // Send ACK for the received packet
+                                Packet packet = responsePacket.toBuilder()
+                                        .setType(2)
+                                        .setPayload(new byte[0])
+                                        .create();
+
+                                channel.send(packet.toBuffer(), routerAddress);
+//                                modifySequence(true);
+
+                                String responsePayload = new String(responsePacket.getPayload(), StandardCharsets.UTF_8);
+
+                                if (responsePayload.equalsIgnoreCase("\r\n"))
+                                    finalPacket = responsePacket;
+                                else {
+                                    // Add packet to buffer
+                                    receivedPackets.add(responsePacket);
+                                    sequenceNumbers.add(responsePacket.getSequenceNumber());
+                                }
                             }
+
+//                                packetList.add(responsePacket);
+                            System.out.println("Received Response List Size:" + receivedPackets.size());
+                            System.out.println("Received Response Payload size:" + responsePacket.getPayload().length);
+
+
+                            if (finalPacket != null && receivedPackets.size() == (finalPacket.getSequenceNumber() - 1)) {
+                                flag = false;
+                            }
+
+                            start += 5;
                         }
 
                         String response = "";
 
-                        for (Packet each : packetList) {
+                        synchronized (receivedPackets) {
+                            Collections.sort(receivedPackets, new Comparator<>() {
+                                @Override
+                                public int compare(Packet o1, Packet o2) {
+                                    return Long.compare(o1.getSequenceNumber(), o2.getSequenceNumber());
+                                }
+                            });
+                        }
+
+                        for (Packet each : receivedPackets) {
                             System.out.println("Response Packet Seq " + each.getSequenceNumber());
                             String responsePayload = new String(each.getPayload(), StandardCharsets.UTF_8);
                             response = response.concat(responsePayload);
@@ -140,9 +270,14 @@ public class Client {
                             redirect = true;
                             System.out.println("\nREDIRECTING...\n");
                         }
-//                        response = "";
-                        keys.clear();
+
+//                        keys.clear();
                         packetList.clear();
+                        ackBuffer.clear();
+                        sequenceNumbers.clear();
+                        receivedPackets.clear();
+                        finalPacket = null;
+                        start = 0;
                     } catch (IOException ex) {
                         ex.printStackTrace();
                     }
@@ -202,6 +337,8 @@ public class Client {
         String payload = httpRequest.processRequest(requestParameters);
         byte[] buffer = payload.getBytes();
         long seq = 1L;
+        byte[] bytes;
+        bytes = "\r\n".getBytes();
 
         for (int i = 0; i < buffer.length; i = i + 1013) {
 //            byte[] bytes = payload.getBytes(i, i + 1012);
@@ -219,8 +356,45 @@ public class Client {
             seq++;
         }
 
+        Packet lastPacket = new Packet.Builder()
+                .setPeerAddress(serverAddress.getAddress())
+                .setPortNumber(serverAddress.getPort())
+                .setSequenceNumber(seq)
+                .setType(2)
+                .setPayload(bytes)
+                .create();
+
+        packetList.add(lastPacket);
+
         return packetList;
     }
+
+    private static boolean sendPackets(ArrayList<Packet> packetList, DatagramChannel channel, SocketAddress routerAddress, int start, Timer timer, ArrayList<TimerTask> tasks) throws IOException {
+        for (int i = start; i < start + 5; i++) {
+            System.out.println("SENDING PACKET NO: " + (i + 1));
+            if (i == packetList.size() - 1) {
+                channel.send(packetList.get(i).toBuffer(), routerAddress);
+                TimerTask task = new PacketTimeout(packetList.get(i), channel, routerAddress);
+                tasks.add(task);
+                timer.schedule(task, 5000, 5000);
+                return false;
+            }
+
+            channel.send(packetList.get(i).toBuffer(), routerAddress);
+            TimerTask task = new PacketTimeout(packetList.get(i), channel, routerAddress);
+            tasks.add(task);
+            timer.schedule(task, 5000, 5000);
+        }
+
+        return true;
+    }
+
+//    protected static long modifySequence(boolean modify) {
+//        if (modify)
+//            currentSequence++;
+//
+//        return currentSequence;
+//    }
 
     @SuppressWarnings("Duplicates")
     private static RequestParameters validate(String input) {

@@ -5,6 +5,7 @@ import java.net.Inet4Address;
 import java.net.InetAddress;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
+import java.util.Comparator;
 
 /**
  * Packet represents a simulated network packet.
@@ -134,6 +135,11 @@ public class Packet {
     public String toString() {
         return String.format("#%d peer=%s:%d, size=%d", sequenceNumber, peerAddress, peerPort, payload.length);
     }
+
+//    @Override
+//    public int compare(Packet o1, Packet o2) {
+//        return Long.compare(o1.getSequenceNumber(), o2.getSequenceNumber());
+//    }
 
     public static class Builder {
         private int type;
