@@ -22,12 +22,15 @@ public class Client {
     static long currentSequence = 0L;
     static Set<Long> sequenceNumbers = new HashSet<>();
     static int start = 1;
+
     public static void main(String[] args) throws IOException, InterruptedException {
         BufferedReader bufferedReader = new BufferedReader(new InputStreamReader(System.in));
         HttpResponse httpResponse = new HttpResponse();
         ArrayBlockingQueue<Long> ackBuffer = new ArrayBlockingQueue<>(99);
 //        ArrayList<TimerTask> tasks = new ArrayList<>();
-        HashMap<Long, TimerTask> tasksMap = new HashMap<>();
+        HashMap<Long, TimerTask> sendTasksMap = new HashMap<>();
+        HashMap<Long, TimerTask> ackTasksMap = new HashMap<>();
+        Set<Long> closingPackets = new HashSet<>();
 //        ArrayBlockingQueue<Packet> responsePackets = new ArrayBlockingQueue<>(99);
         List<Packet> receivedPackets = Collections.synchronizedList(new ArrayList<>());
 //        Set<Long> sequenceNumbers = new HashSet<>();
@@ -98,7 +101,7 @@ public class Client {
 
                         // Send Packets
                         while (flag) {
-                            flag = sendPackets(packetList, channel, routerAddress, timer, tasksMap);
+                            flag = sendPackets(packetList, channel, routerAddress, timer, sendTasksMap);
                             System.out.println("BEFORE START:" + Client.start);
                             System.out.println("AFTER START:" + Client.start);
 
@@ -109,7 +112,7 @@ public class Client {
 
 
                             // Receive each Ack one by one
-                            while (k < 5) {
+                            while (sendTasksMap.size() != 0) {
                                 channel.receive(buf);
                                 buf.flip();
 
@@ -121,24 +124,24 @@ public class Client {
                                 System.out.println("BUFFER SIZE:" + buf.limit());
                                 buf.clear();
 
-                                if (!ackBuffer.contains(ackPacket.getSequenceNumber())) {
+                                if (!ackBuffer.contains(ackPacket.getSequenceNumber()) && ackPacket.getType() == 2) {
                                     ackBuffer.add(ackPacket.getSequenceNumber());
 
                                     System.out.println("ACK BUFFER SIZE:" + ackBuffer.size());
-                                    System.out.println("TASKS SIZE:" + tasksMap.size());
-                                    System.out.println("ACK SEQ:" + ((int) ackPacket.getSequenceNumber()));
+                                    System.out.println("SENT PACKETS TASKS SIZE:" + sendTasksMap.size());
+                                    System.out.println("RECEIVED ACK SEQ:" + ((int) ackPacket.getSequenceNumber()));
 
-                                    if (tasksMap.containsKey(ackPacket.getSequenceNumber())) {
-                                        TimerTask timerTask = tasksMap.get(ackPacket.getSequenceNumber());
+                                    if (sendTasksMap.containsKey(ackPacket.getSequenceNumber())) {
+                                        TimerTask timerTask = sendTasksMap.get(ackPacket.getSequenceNumber());
                                         timerTask.cancel();
-                                        tasksMap.remove(ackPacket.getSequenceNumber());
+                                        sendTasksMap.remove(ackPacket.getSequenceNumber());
                                         System.out.println("CANCELLED TASK:" + (ackPacket.getSequenceNumber()));
                                     }
                                 }
 
-                                if (tasksMap.size() == 0) {
-                                    break;
-                                }
+//                                if (sendTasksMap.size() == 0) {
+//                                    break;
+//                                }
 
 //                                packetList.add(responsePacket);
                                 System.out.println("Received Ack List Size:" + ackBuffer.size());
@@ -150,13 +153,14 @@ public class Client {
 //                                    System.out.println("No response after timeout");
 //                                    break;
 //                                }
-                                k++;
+//                                k++;
                             }
 //                            start += 5;
 //                            start = (int) currentSequence;
                         }
 //                        packetList.clear();
                         timer.cancel();
+                        timer.purge();
 
 //                        // Receive a packet within the timeout
 //                        channel.configureBlocking(false);
@@ -213,22 +217,42 @@ public class Client {
                             Packet responsePacket = Packet.fromBuffer(buf);
                             buf.clear();
 
+                            // Modify and check this condition in sync with one at the server
 //                            if (responsePacket.getSequenceNumber() < currentSequence - start || responsePacket.getSequenceNumber() > currentSequence - start)
 
-                            if (!sequenceNumbers.contains(responsePacket.getSequenceNumber())) {
+//                            if (responsePacket.getType() == 1) {
+//                                if (!closingPackets.contains(responsePacket.getSequenceNumber())) {
+////                                    receivedPackets.clear();
+////                                    finalPacket = null;
+////                                    buf.clear();
+////                                    packetList.clear();
+////                                    ackBuffer.clear();
+//                                    closingPackets.add(responsePacket.getSequenceNumber());
+//                                } else
+//                                    continue;
+//                            }
+
+//                            if (responsePacket.getType() == 2) {
+//                                if (sequenceNumbers.contains(responsePacket.getSequenceNumber())) {
+//                                    continue;
+//                                }
+//                            }
+
+                            if (!sequenceNumbers.contains(responsePacket.getSequenceNumber()) && responsePacket.getType() == 0) {
 //                                sequenceNumbers.add(responsePacket.getSequenceNumber());
                                 System.out.println("Received Response PACK Seq number:" + responsePacket.getSequenceNumber());
-//                                System.out.println("Current Sequence Pointer:" + currentSequence);
 
-                                // TO-DO Add ack resend - Drop and delay
-                                // Send ACK for the received packet
-                                Packet packet = responsePacket.toBuilder()
-                                        .setType(2)
-                                        .setPayload(new byte[0])
-                                        .create();
-
-                                channel.send(packet.toBuffer(), routerAddress);
+//                                Packet packet = responsePacket.toBuilder()
+//                                        .setType(2)
+//                                        .setPayload(new byte[0])
+//                                        .create();
+//
+//                                channel.send(packet.toBuffer(), routerAddress);
                                 modifySequence(true);
+                                System.out.println("Current Sequence Pointer:" + currentSequence);
+
+                                // Send ACK for the received packet
+                                sendAck(responsePacket, channel, routerAddress, timer, ackTasksMap);
 
                                 String responsePayload = new String(responsePacket.getPayload(), StandardCharsets.UTF_8);
 
@@ -239,6 +263,10 @@ public class Client {
                                     receivedPackets.add(responsePacket);
                                 }
                                 sequenceNumbers.add(responsePacket.getSequenceNumber());
+                            } else if (responsePacket.getType() == 0) {
+                                sendAck(responsePacket, channel, routerAddress, timer, ackTasksMap);
+                                System.out.println("Resensding ACK for Packet: " + responsePacket.getSequenceNumber());
+                                continue;
                             }
 
                             start = (int) currentSequence;
@@ -256,6 +284,33 @@ public class Client {
 //                            start += 5;
 //                            start = (int) currentSequence;
                         }
+
+                        ChannelHelper channelHelper = new ChannelHelper(channel, routerAddress);
+                        channelHelper.start();
+
+//                        if (!closingPackets.contains(currentSequence)) {
+//                            // Closing the connection
+//                            Packet closingPacket = new Packet.Builder()
+//                                    .setType(1)
+//                                    .setSequenceNumber(currentSequence)
+//                                    .setPeerAddress(serverAddress.getAddress())
+//                                    .setPortNumber(serverAddress.getPort())
+//                                    .setPayload(new byte[200]).create();
+//
+//                            int j = 1;
+//
+//                            while (j < 5) {
+//                                channel.send(closingPacket.toBuffer(), routerAddress);
+//                                j++;
+//                            }
+//
+//                            closingPackets.add(currentSequence);
+//                        }
+
+//                        TimerTask task = new PacketTimeout(closingPacket, channel, routerAddress);
+//                        ackTasksMap.put(closingPacket.getSequenceNumber(), task);
+//                        timer.schedule(task, 5000, 5000);
+//                        timer.scheduleAtFixedRate(task, 5000, 5000);
 
                         String response = "";
 
@@ -278,6 +333,7 @@ public class Client {
 
 //                        String responsePayload = new String(packetList.get(0).getPayload(), StandardCharsets.UTF_8);
 //                        logger.info("Payload: {}",  payload);
+                        channelHelper.join();
 
                         if (httpResponse.processResponse(response, requestParameters)) {
                             requestParameters.requestLine = requestParameters.redirectionUrl;
@@ -374,7 +430,7 @@ public class Client {
                 .setPeerAddress(serverAddress.getAddress())
                 .setPortNumber(serverAddress.getPort())
                 .setSequenceNumber(modifySequence(true))
-                .setType(2)
+                .setType(0)
                 .setPayload(bytes)
                 .create();
 
@@ -393,7 +449,7 @@ public class Client {
                 channel.send(packetList.get((long) i).toBuffer(), routerAddress);
                 TimerTask task = new PacketTimeout(packetList.get((long) i), channel, routerAddress);
                 tasks.put((long) i, task);
-                timer.schedule(task, 5000, 5000);
+                timer.schedule(task, 3000, 5000);
                 packetList.remove((long) i);
                 Client.start++;
                 return false;
@@ -402,12 +458,22 @@ public class Client {
             channel.send(packetList.get((long) i).toBuffer(), routerAddress);
             TimerTask task = new PacketTimeout(packetList.get((long) i), channel, routerAddress);
             tasks.put((long) i, task);
-            timer.schedule(task, 5000, 5000);
+            timer.schedule(task, 3000, 5000);
             packetList.remove((long) i);
             Client.start++;
         }
 
         return true;
+    }
+
+    private static void sendAck(Packet responsePacket, DatagramChannel channel, SocketAddress routerAddress, Timer timer, HashMap<Long, TimerTask> ackTasksMap) throws IOException {
+        Packet packet = responsePacket.toBuilder()
+                .setType(2)
+                .setPayload(new byte[0])
+                .create();
+
+        channel.send(packet.toBuffer(), routerAddress);
+        System.out.println("Sending ACK for packet: " + packet.getSequenceNumber());
     }
 
     protected static long modifySequence(boolean modify) {
