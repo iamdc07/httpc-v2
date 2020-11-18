@@ -21,7 +21,8 @@ import static java.nio.channels.SelectionKey.OP_READ;
 public class Client {
     static long currentSequence = 0L;
     static Set<Long> sequenceNumbers = new HashSet<>();
-    static int start = 1;
+    static int start = 2;
+    static boolean firstExecution = true;
 
     public static void main(String[] args) throws IOException, InterruptedException {
         BufferedReader bufferedReader = new BufferedReader(new InputStreamReader(System.in));
@@ -70,6 +71,12 @@ public class Client {
 
                 if (requestParameters.isValid) {
                     HttpRequest httpRequest = new HttpRequest();
+
+                    if (firstExecution) {
+                        Packet packet = connect(requestParameters);
+                        receivedPackets.add(packet);
+                        firstExecution = false;
+                    }
 
                     try (DatagramChannel channel = DatagramChannel.open()) {
                         InetSocketAddress serverAddress = new InetSocketAddress(requestParameters.host, requestParameters.port);
@@ -207,6 +214,7 @@ public class Client {
 
                         // Receive Response
                         while (flag) {
+                            System.out.println("Inside while");
                             channel.receive(buf);
                             buf.flip();
 
@@ -276,8 +284,8 @@ public class Client {
                             System.out.println("Received Response List Size:" + receivedPackets.size());
                             System.out.println("Received Response Payload size:" + responsePacket.getPayload().length);
 
-
-                            if (finalPacket != null && sequenceNumbers.size() == (finalPacket.getSequenceNumber())) {
+                            System.out.println("Inside IF" + finalPacket);
+                            if (finalPacket != null && sequenceNumbers.size() == (finalPacket.getSequenceNumber() + 1)) {
                                 flag = false;
                             }
 
@@ -285,6 +293,7 @@ public class Client {
 //                            start = (int) currentSequence;
                         }
 
+                        System.out.println("In channel helper");
                         ChannelHelper channelHelper = new ChannelHelper(channel, routerAddress);
                         channelHelper.start();
 
@@ -481,6 +490,66 @@ public class Client {
             currentSequence++;
 
         return currentSequence;
+    }
+
+    private static Packet connect(RequestParameters requestParameters) {
+        try (DatagramChannel channel = DatagramChannel.open()) {
+            InetSocketAddress serverAddress = new InetSocketAddress(requestParameters.host, requestParameters.port);
+            SocketAddress routerAddress = new InetSocketAddress(requestParameters.routerHost, requestParameters.routerPort);
+
+            channel.configureBlocking(false);
+            Selector selector = Selector.open();
+            channel.register(selector, OP_READ);
+
+            Set<SelectionKey> keys = selector.selectedKeys();
+            System.out.println("Selector Keys Size:" + keys.size());
+
+            Packet packet = new Packet.Builder()
+                    .setType(1)
+                    .setSequenceNumber(currentSequence)
+                    .setPeerAddress(serverAddress.getAddress())
+                    .setPortNumber(serverAddress.getPort())
+                    .setPayload(new byte[200])
+                    .create();
+
+            sequenceNumbers.add(packet.getSequenceNumber());
+
+            boolean flag = true;
+
+            while (flag) {
+                channel.send(packet.toBuffer(), routerAddress);
+
+                selector.select(3000);
+                Set<SelectionKey> selectedKeys = selector.selectedKeys();
+
+                // Create Buffer for Response
+                ByteBuffer buf = ByteBuffer.allocate(Packet.MAX_LEN);
+
+                // Receive Response
+                channel.receive(buf);
+                buf.flip();
+
+                if (buf.limit() < Packet.MIN_LEN || buf.limit() > Packet.MAX_LEN)
+                    continue;
+
+                Packet responsePacket = Packet.fromBuffer(buf);
+                buf.clear();
+
+                if (responsePacket.getType() == 1 && !sequenceNumbers.contains(responsePacket.getSequenceNumber())) {
+                    modifySequence(true);
+                    sequenceNumbers.add(responsePacket.getSequenceNumber());
+                    flag = false;
+                }
+
+                return responsePacket;
+            }
+
+            System.out.println("Handshake completed");
+        } catch (IOException ex) {
+            ex.printStackTrace();
+        }
+
+        return null;
     }
 
     @SuppressWarnings("Duplicates")

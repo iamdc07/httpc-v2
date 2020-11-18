@@ -34,7 +34,7 @@ public class ChannelHelper extends Thread {
 //            SelectionKey key = iterator.next();
 
             System.out.println("I:" + i);
-            while (i < 2) {
+            while (i < 5) {
                 selector.select(5000);
                 Set<SelectionKey> selectedKeys = selector.selectedKeys();
                 Iterator<SelectionKey> iter = selectedKeys.iterator();
