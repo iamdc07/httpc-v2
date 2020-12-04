@@ -29,11 +29,8 @@ public class ChannelHelper extends Thread {
             channel.register(selector, OP_READ);
 
             Set<SelectionKey> keys = selector.selectedKeys();
-            System.out.println("Selector Keys Size:" + keys.size());
             Iterator<SelectionKey> iterator = keys.iterator();
-//            SelectionKey key = iterator.next();
 
-            System.out.println("I:" + i);
             while (i < 5) {
                 selector.select(5000);
                 Set<SelectionKey> selectedKeys = selector.selectedKeys();

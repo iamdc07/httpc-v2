@@ -28,19 +28,13 @@ public class Client {
         BufferedReader bufferedReader = new BufferedReader(new InputStreamReader(System.in));
         HttpResponse httpResponse = new HttpResponse();
         ArrayBlockingQueue<Long> ackBuffer = new ArrayBlockingQueue<>(99);
-//        ArrayList<TimerTask> tasks = new ArrayList<>();
         HashMap<Long, TimerTask> sendTasksMap = new HashMap<>();
         HashMap<Long, TimerTask> ackTasksMap = new HashMap<>();
-        Set<Long> closingPackets = new HashSet<>();
-//        ArrayBlockingQueue<Packet> responsePackets = new ArrayBlockingQueue<>(99);
         List<Packet> receivedPackets = Collections.synchronizedList(new ArrayList<>());
-//        Set<Long> sequenceNumbers = new HashSet<>();
-//        Charset utf8 = StandardCharsets.UTF_8;
         RequestParameters requestParameters = null;
         Packet finalPacket = null;
         String input = "", choice = "";
         boolean redirect = false;
-
 
         System.out.print("Type in 'httpc Command' or 'httpc help' to get started!");
 
@@ -73,6 +67,7 @@ public class Client {
                     HttpRequest httpRequest = new HttpRequest();
 
                     if (firstExecution) {
+                        // 3-way Handshake
                         Packet packet = connect(requestParameters);
                         receivedPackets.add(packet);
                         firstExecution = false;
@@ -81,27 +76,9 @@ public class Client {
                     try (DatagramChannel channel = DatagramChannel.open()) {
                         InetSocketAddress serverAddress = new InetSocketAddress(requestParameters.host, requestParameters.port);
                         SocketAddress routerAddress = new InetSocketAddress(requestParameters.routerHost, requestParameters.routerPort);
-//                        InetSocketAddress serverAddress = new InetSocketAddress(serverHost, serverPort);
-//                        SocketAddress routerAddress = new InetSocketAddress(routerHost, routerPort);
-
-                        // TO-DO Have a 3-way Handshake here
-                        // TO-DO Make it reliable
 
                         HashMap<Long, Packet> packetList = generatePackets(httpRequest, requestParameters, serverAddress);
 
-//                        Packet packet = new Packet.Builder()
-//                                .setType(0)
-//                                .setSequenceNumber(1L)
-//                                .setPortNumber(serverAddress.getPort())
-//                                .setPeerAddress(serverAddress.getAddress())
-//                                .setPayload(payload.getBytes())
-//                                .create();
-
-                        // Send each packet one by one
-//                        for (Packet each : packetList) {
-//                            channel.send(each.toBuffer(), routerAddress);
-//                            // Packet Sent
-//                        }
                         boolean flag = true;
 
                         Timer timer = new Timer(true);
@@ -145,76 +122,19 @@ public class Client {
                                         System.out.println("CANCELLED TASK:" + (ackPacket.getSequenceNumber()));
                                     }
                                 }
-
-//                                if (sendTasksMap.size() == 0) {
-//                                    break;
-//                                }
-
-//                                packetList.add(responsePacket);
-                                System.out.println("Received Ack List Size:" + ackBuffer.size());
-//                                // Wait for response
-//                                selector.select(5000);
-//
-//                                keys = selector.selectedKeys();
-//                                if (keys.isEmpty()) {
-//                                    System.out.println("No response after timeout");
-//                                    break;
-//                                }
-//                                k++;
                             }
-//                            start += 5;
-//                            start = (int) currentSequence;
                         }
-//                        packetList.clear();
+
                         timer.cancel();
                         timer.purge();
 
-//                        // Receive a packet within the timeout
-//                        channel.configureBlocking(false);
-//                        Selector selector = Selector.open();
-//                        channel.register(selector, OP_READ);
-//                        // Waiting for the response
-//                        selector.select(5000);
-//
-//                        Set<SelectionKey> keys = selector.selectedKeys();
-//                        if (keys.isEmpty()) {
-//                            System.out.println("No response after timeout");
-//                            continue;
-//                        }
-
-                        // Create Buffer for Response
-//                        ByteBuffer buf = ByteBuffer.allocate(Packet.MAX_LEN);
-//
-//                        // Receive each packet one by one
-//                        while (true) {
-//                            channel.receive(buf);
-//                            buf.flip();
-//
-//                            if (buf.limit() < Packet.MIN_LEN || buf.limit() > Packet.MAX_LEN)
-//                                break;
-//
-//                            Packet responsePacket = Packet.fromBuffer(buf);
-//                            buf.clear();
-//                            packetList.add(responsePacket);
-//                            System.out.println("Received ArrayList Size:" + packetList.size());
-//                            // Wait for response
-//                            selector.select(5000);
-//
-//                            keys = selector.selectedKeys();
-//                            if (keys.isEmpty()) {
-//                                System.out.println("No response after timeout");
-//                                break;
-//                            }
-//                        }
                         flag = true;
-//                        start = 0;
 
                         // Create Buffer for Response
                         ByteBuffer buf = ByteBuffer.allocate(Packet.MAX_LEN);
 
                         // Receive Response
                         while (flag) {
-                            System.out.println("Inside while");
                             channel.receive(buf);
                             buf.flip();
 
@@ -225,37 +145,10 @@ public class Client {
                             Packet responsePacket = Packet.fromBuffer(buf);
                             buf.clear();
 
-                            // Modify and check this condition in sync with one at the server
-//                            if (responsePacket.getSequenceNumber() < currentSequence - start || responsePacket.getSequenceNumber() > currentSequence - start)
-
-//                            if (responsePacket.getType() == 1) {
-//                                if (!closingPackets.contains(responsePacket.getSequenceNumber())) {
-////                                    receivedPackets.clear();
-////                                    finalPacket = null;
-////                                    buf.clear();
-////                                    packetList.clear();
-////                                    ackBuffer.clear();
-//                                    closingPackets.add(responsePacket.getSequenceNumber());
-//                                } else
-//                                    continue;
-//                            }
-
-//                            if (responsePacket.getType() == 2) {
-//                                if (sequenceNumbers.contains(responsePacket.getSequenceNumber())) {
-//                                    continue;
-//                                }
-//                            }
-
+                            // Check if the packet received is duplicate
                             if (!sequenceNumbers.contains(responsePacket.getSequenceNumber()) && responsePacket.getType() == 0) {
-//                                sequenceNumbers.add(responsePacket.getSequenceNumber());
-                                System.out.println("Received Response PACK Seq number:" + responsePacket.getSequenceNumber());
+                                System.out.println("Received Response Packet:" + responsePacket.getSequenceNumber());
 
-//                                Packet packet = responsePacket.toBuilder()
-//                                        .setType(2)
-//                                        .setPayload(new byte[0])
-//                                        .create();
-//
-//                                channel.send(packet.toBuffer(), routerAddress);
                                 modifySequence(true);
                                 System.out.println("Current Sequence Pointer:" + currentSequence);
 
@@ -280,46 +173,17 @@ public class Client {
                             start = (int) currentSequence;
                             ++Client.start;
 
-//                                packetList.add(responsePacket);
                             System.out.println("Received Response List Size:" + receivedPackets.size());
                             System.out.println("Received Response Payload size:" + responsePacket.getPayload().length);
 
-                            System.out.println("Inside IF" + finalPacket);
                             if (finalPacket != null && sequenceNumbers.size() == (finalPacket.getSequenceNumber() + 1)) {
                                 flag = false;
                             }
-
-//                            start += 5;
-//                            start = (int) currentSequence;
                         }
 
                         System.out.println("In channel helper");
                         ChannelHelper channelHelper = new ChannelHelper(channel, routerAddress);
                         channelHelper.start();
-
-//                        if (!closingPackets.contains(currentSequence)) {
-//                            // Closing the connection
-//                            Packet closingPacket = new Packet.Builder()
-//                                    .setType(1)
-//                                    .setSequenceNumber(currentSequence)
-//                                    .setPeerAddress(serverAddress.getAddress())
-//                                    .setPortNumber(serverAddress.getPort())
-//                                    .setPayload(new byte[200]).create();
-//
-//                            int j = 1;
-//
-//                            while (j < 5) {
-//                                channel.send(closingPacket.toBuffer(), routerAddress);
-//                                j++;
-//                            }
-//
-//                            closingPackets.add(currentSequence);
-//                        }
-
-//                        TimerTask task = new PacketTimeout(closingPacket, channel, routerAddress);
-//                        ackTasksMap.put(closingPacket.getSequenceNumber(), task);
-//                        timer.schedule(task, 5000, 5000);
-//                        timer.scheduleAtFixedRate(task, 5000, 5000);
 
                         String response = "";
 
@@ -337,11 +201,7 @@ public class Client {
                             String responsePayload = new String(each.getPayload(), StandardCharsets.UTF_8);
                             response = response.concat(responsePayload);
                         }
-//                        logger.info("Packet: {}", resp);
-//                        logger.info("Router: {}", router);
 
-//                        String responsePayload = new String(packetList.get(0).getPayload(), StandardCharsets.UTF_8);
-//                        logger.info("Payload: {}",  payload);
                         channelHelper.join();
 
                         if (httpResponse.processResponse(response, requestParameters)) {
@@ -350,49 +210,13 @@ public class Client {
                             System.out.println("\nREDIRECTING...\n");
                         }
 
-//                        keys.clear();
                         packetList.clear();
                         ackBuffer.clear();
-//                        sequenceNumbers.clear();
                         receivedPackets.clear();
                         finalPacket = null;
-//                        start = 0;
                     } catch (IOException ex) {
                         ex.printStackTrace();
                     }
-//                    try {
-//
-//                        SocketChannel socketChannel = SocketChannel.open();
-//                        socketChannel.connect(socketAddress);
-//                        socketChannel.write(byteBuffer);
-//                        byteBuffer.clear();
-//
-//                        // Receiving response from the server
-//                        while (byteBuffer.hasRemaining()) {
-//                            int length = socketChannel.read(byteBuffer);
-//
-//                            if (length == -1)
-//                                break;
-//
-//                            byteBuffer.flip();
-//
-//                            String lines = String.valueOf(utf8.decode(byteBuffer));
-//                            response = response.concat(lines);
-//                            byteBuffer.compact();
-//                        }
-//
-//                        byteBuffer.clear();
-//                        socketChannel.close();
-//
-//                        if (httpResponse.processResponse(response, requestParameters)) {
-//                            requestParameters.requestLine = requestParameters.redirectionUrl;
-//                            redirect = true;
-//                            System.out.println("\nREDIRECTING...\n");
-//                        }
-//                        response = "";
-//                    } catch (Exception ex) {
-//                        ex.printStackTrace();
-//                    }
                 } else {
                     System.out.println("Your input is invalid, please try again!");
                 }
@@ -400,7 +224,7 @@ public class Client {
         }
     }
 
-    private static void invokeThreads(RequestParameters requestParameters) throws InterruptedException, IOException {
+    private static void invokeThreads(RequestParameters requestParameters) {
 //        SocketAddress socketAddress = new InetSocketAddress(requestParameters.host, 8080);
         InetSocketAddress serverAddress = new InetSocketAddress(requestParameters.host, requestParameters.port);
         SocketAddress routerAddress = new InetSocketAddress(requestParameters.routerHost, requestParameters.routerPort);
@@ -415,11 +239,9 @@ public class Client {
         HashMap<Long, Packet> packetList = new HashMap<Long, Packet>();
         String payload = httpRequest.processRequest(requestParameters);
         byte[] buffer = payload.getBytes();
-//        long seq = 1L;
         byte[] bytes;
         bytes = "\r\n".getBytes();
         for (int i = 0; i < buffer.length; i = i + 1013) {
-//            byte[] bytes = payload.getBytes(i, i + 1012);
             byte[] slice = Arrays.copyOfRange(buffer, i, i + 1012);
 
             Packet packet = new Packet.Builder()
@@ -432,7 +254,6 @@ public class Client {
 
             packetList.put(currentSequence, packet);
             sequenceNumbers.add(currentSequence);
-//            seq++;
         }
 
         Packet lastPacket = new Packet.Builder()
@@ -502,7 +323,6 @@ public class Client {
             channel.register(selector, OP_READ);
 
             Set<SelectionKey> keys = selector.selectedKeys();
-            System.out.println("Selector Keys Size:" + keys.size());
 
             Packet packet = new Packet.Builder()
                     .setType(1)
